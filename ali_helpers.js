@@ -162,7 +162,9 @@
 
     const cadAmount = (usdValue * rate).toFixed(2);
     const cadValue = formatCad(Number(cadAmount));
-    let cadRow = container.querySelector(`.${CAD_ROW_CLASS}`);
+    const host = container.closest('.order-item-content-opt') || container.parentElement;
+    if (!host) return;
+    let cadRow = host.querySelector(`:scope > .${CAD_ROW_CLASS}`);
 
     if (!cadRow) {
       logDebug('Injecting CAD row.');
@@ -184,7 +186,7 @@
       cadCopy.addEventListener('click', () => handleCopy(cadCopy, cadValueNode.dataset.value || cadAmount));
 
       cadRow.append(cadLabel, cadValueNode, cadCopy);
-      container.appendChild(cadRow);
+      host.insertBefore(cadRow, host.querySelector('.order-item-btns-wrap') || null);
     }
 
     const cadValueNode = cadRow.querySelector('.ae-helper-cad-value');
