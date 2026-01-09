@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const RATE_URL = 'https://api.exchangerate.host/latest?base=USD&symbols=CAD';
+  const RATE_URL = 'https://open.er-api.com/v6/latest/USD';
   const RATE_REFRESH_MS = 10 * 60 * 1000;
   const CONTAINER_SELECTOR = '.order-item-content-opt-price';
   const TOTAL_SELECTOR = '[data-pl="order_item_content_price_total"]';
@@ -33,9 +33,24 @@
         line-height: 1;
         margin-right: 8px;
         padding: 4px 8px;
+        position: relative;
         border-radius: 4px;
+        transition: transform 150ms ease, background 150ms ease, opacity 150ms ease;
       }
       .${COPY_BUTTON_CLASS}:hover { background: #1557b0; }
+      .${COPY_BUTTON_CLASS}.copied {
+        background: #188038;
+        transform: scale(1.05);
+      }
+      .${COPY_BUTTON_CLASS}.copied::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 4px;
+        box-shadow: 0 0 0 6px rgba(24, 128, 56, 0.15);
+        opacity: 0;
+        animation: ae-helper-pulse 450ms ease;
+      }
       .${CAD_ROW_CLASS} {
         display: flex;
         align-items: center;
@@ -45,6 +60,10 @@
         color: #222;
       }
       .${CAD_ROW_CLASS} .${COPY_BUTTON_CLASS} { margin-right: 0; }
+      @keyframes ae-helper-pulse {
+        0% { opacity: 1; transform: scale(0.9); }
+        100% { opacity: 0; transform: scale(1.4); }
+      }
     `;
 
     if (typeof GM_addStyle === 'function') {
@@ -117,7 +136,8 @@
     const usdValue = parseUsd(usdText);
     if (usdValue === null) return;
 
-    const cadValue = formatCad(usdValue * rate);
+    const cadAmount = (usdValue * rate).toFixed(2);
+    const cadValue = formatCad(Number(cadAmount));
     let cadRow = container.querySelector(`.${CAD_ROW_CLASS}`);
 
     if (!cadRow) {
@@ -130,19 +150,23 @@
 
       const cadValueNode = document.createElement('span');
       cadValueNode.className = 'ae-helper-cad-value';
+      cadValueNode.dataset.value = cadAmount;
 
       const cadCopy = document.createElement('button');
       cadCopy.type = 'button';
       cadCopy.className = COPY_BUTTON_CLASS;
       cadCopy.textContent = 'Copy';
-      cadCopy.addEventListener('click', () => copyText(cadValueNode.textContent || cadValue));
+      cadCopy.addEventListener('click', () => handleCopy(cadCopy, cadValueNode.dataset.value || cadAmount));
 
       cadRow.append(cadLabel, cadValueNode, cadCopy);
       container.appendChild(cadRow);
     }
 
     const cadValueNode = cadRow.querySelector('.ae-helper-cad-value');
-    if (cadValueNode) cadValueNode.textContent = cadValue;
+    if (cadValueNode) {
+      cadValueNode.textContent = cadValue;
+      cadValueNode.dataset.value = cadAmount;
+    }
   };
 
   const enhanceTotal = (container) => {
@@ -156,7 +180,8 @@
       copyButton.textContent = 'Copy';
       copyButton.addEventListener('click', () => {
         const usdText = getUsdText(totalNode);
-        if (usdText) copyText(usdText);
+        const usdValue = usdText ? parseUsd(usdText) : null;
+        if (usdValue !== null) handleCopy(copyButton, usdValue.toString());
       });
 
       totalNode.parentElement?.insertBefore(copyButton, totalNode);
@@ -167,6 +192,18 @@
 
   const scan = () => {
     document.querySelectorAll(CONTAINER_SELECTOR).forEach(enhanceTotal);
+  };
+
+  const handleCopy = (button, text) => {
+    if (!text) return;
+    copyText(text);
+    const original = button.textContent;
+    button.textContent = 'Copied';
+    button.classList.add('copied');
+    window.setTimeout(() => {
+      button.textContent = original;
+      button.classList.remove('copied');
+    }, 1200);
   };
 
   const observe = () => {
