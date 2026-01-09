@@ -17,9 +17,15 @@
   const TOTAL_SELECTOR = '[data-pl="order_item_content_price_total"]';
   const COPY_BUTTON_CLASS = 'ae-helper-copy-btn';
   const CAD_ROW_CLASS = 'ae-helper-cad-row';
+  const LOG_PREFIX = '[AE Helpers]';
 
   let cadRate = null;
   let lastRateFetch = 0;
+  let lastRateError = null;
+
+  const logDebug = (...args) => {
+    console.debug(LOG_PREFIX, ...args);
+  };
 
   const addStyles = () => {
     const css = `
@@ -115,13 +121,23 @@
     if (cadRate && now - lastRateFetch < RATE_REFRESH_MS) return cadRate;
 
     try {
+      logDebug('Fetching FX rate...', RATE_URL);
       const response = await fetch(RATE_URL, { credentials: 'omit' });
+      logDebug('FX response status:', response.status);
       const data = await response.json();
+      logDebug('FX response payload:', data);
       if (data && data.rates && typeof data.rates.CAD === 'number') {
         cadRate = data.rates.CAD;
         lastRateFetch = now;
+        lastRateError = null;
+        logDebug('FX rate updated:', cadRate);
+      } else {
+        lastRateError = 'CAD rate missing in response';
+        logDebug('FX rate missing in response.');
       }
     } catch (error) {
+      lastRateError = error;
+      logDebug('FX rate fetch failed:', error);
       return cadRate;
     }
 
@@ -130,17 +146,24 @@
 
   const updateCadRow = async (container, totalNode) => {
     const rate = await ensureRate();
-    if (!rate) return;
+    if (!rate) {
+      logDebug('No FX rate available yet.', { lastRateError });
+      return;
+    }
 
     const usdText = getUsdText(totalNode);
     const usdValue = parseUsd(usdText);
-    if (usdValue === null) return;
+    if (usdValue === null) {
+      logDebug('Unable to parse USD value from text:', usdText);
+      return;
+    }
 
     const cadAmount = (usdValue * rate).toFixed(2);
     const cadValue = formatCad(Number(cadAmount));
     let cadRow = container.querySelector(`.${CAD_ROW_CLASS}`);
 
     if (!cadRow) {
+      logDebug('Injecting CAD row.');
       cadRow = document.createElement('div');
       cadRow.className = CAD_ROW_CLASS;
 
@@ -174,6 +197,7 @@
     if (!totalNode) return;
 
     if (!container.querySelector(`.${COPY_BUTTON_CLASS}`)) {
+      logDebug('Injecting USD copy button.');
       const copyButton = document.createElement('button');
       copyButton.type = 'button';
       copyButton.className = COPY_BUTTON_CLASS;
@@ -191,12 +215,14 @@
   };
 
   const scan = () => {
+    logDebug('Scanning totals...');
     document.querySelectorAll(CONTAINER_SELECTOR).forEach(enhanceTotal);
   };
 
   const handleCopy = (button, text) => {
     if (!text) return;
     copyText(text);
+    logDebug('Copied value:', text);
     const original = button.textContent;
     button.textContent = 'Copied';
     button.classList.add('copied');
