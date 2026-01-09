@@ -171,6 +171,12 @@
       cadRow = document.createElement('div');
       cadRow.className = CAD_ROW_CLASS;
 
+      const cadCopy = document.createElement('button');
+      cadCopy.type = 'button';
+      cadCopy.className = COPY_BUTTON_CLASS;
+      cadCopy.textContent = 'Copy';
+      cadCopy.addEventListener('click', () => handleCopy(cadCopy, cadValueNode.dataset.value || cadAmount));
+
       const cadLabel = document.createElement('span');
       cadLabel.className = 'ae-helper-cad-label';
       cadLabel.textContent = 'CAD Total:';
@@ -179,13 +185,7 @@
       cadValueNode.className = 'ae-helper-cad-value';
       cadValueNode.dataset.value = cadAmount;
 
-      const cadCopy = document.createElement('button');
-      cadCopy.type = 'button';
-      cadCopy.className = COPY_BUTTON_CLASS;
-      cadCopy.textContent = 'Copy';
-      cadCopy.addEventListener('click', () => handleCopy(cadCopy, cadValueNode.dataset.value || cadAmount));
-
-      cadRow.append(cadLabel, cadValueNode, cadCopy);
+      cadRow.append(cadCopy, cadLabel, cadValueNode);
       host.insertBefore(cadRow, host.querySelector('.order-item-btns-wrap') || null);
     }
 
