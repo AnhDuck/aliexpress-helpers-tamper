@@ -22,6 +22,8 @@
   let cadRate = null;
   let lastRateFetch = 0;
   let lastRateError = null;
+  let scanScheduled = false;
+  const processedContainers = new WeakSet();
 
   const logDebug = (...args) => {
     console.debug(LOG_PREFIX, ...args);
@@ -196,7 +198,8 @@
     const totalNode = container.querySelector(TOTAL_SELECTOR);
     if (!totalNode) return;
 
-    if (!container.querySelector(`.${COPY_BUTTON_CLASS}`)) {
+    if (!processedContainers.has(container)) {
+      processedContainers.add(container);
       logDebug('Injecting USD copy button.');
       const copyButton = document.createElement('button');
       copyButton.type = 'button';
@@ -219,6 +222,15 @@
     document.querySelectorAll(CONTAINER_SELECTOR).forEach(enhanceTotal);
   };
 
+  const scheduleScan = () => {
+    if (scanScheduled) return;
+    scanScheduled = true;
+    window.requestAnimationFrame(() => {
+      scanScheduled = false;
+      scan();
+    });
+  };
+
   const handleCopy = (button, text) => {
     if (!text) return;
     copyText(text);
@@ -233,15 +245,18 @@
   };
 
   const observe = () => {
-    const observer = new MutationObserver(scan);
+    const observer = new MutationObserver(scheduleScan);
     observer.observe(document.body, { childList: true, subtree: true });
   };
 
   const init = () => {
     addStyles();
-    scan();
+    scheduleScan();
     observe();
-    setInterval(scan, RATE_REFRESH_MS);
+    setInterval(() => {
+      cadRate = null;
+      scheduleScan();
+    }, RATE_REFRESH_MS);
   };
 
   if (document.readyState === 'loading') {
