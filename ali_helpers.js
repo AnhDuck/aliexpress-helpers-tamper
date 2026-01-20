@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Helpers
 // @namespace    https://www.aliexpress.com/
-// @version      0.2.0
+// @version      0.2.1
 // @description  Add copy buttons, CAD conversion, and per-unit cost helper on AliExpress.
 // @match        https://www.aliexpress.com/p/order/index.html*
 // @match        https://www.aliexpress.com/p/shoppingcart/index.html*
@@ -31,6 +31,8 @@
   const PER_UNIT_LABEL_CLASS = 'ae-helper-per-unit-label';
   const PER_UNIT_VALUE_CLASS = 'ae-helper-per-unit-value';
   const PER_UNIT_MESSAGE_CLASS = 'ae-helper-per-unit-message';
+  const CART_CAD_TOTAL_CLASS = 'ae-helper-cart-cad-total';
+  const CART_BADGE_CLASS = 'ae-helper-badge';
   const LOG_PREFIX = '[AE Helpers]';
 
   let cadRate = null;
@@ -48,64 +50,120 @@
     const css = `
       ${CONTAINER_SELECTOR} { align-items: center; }
       .${COPY_BUTTON_CLASS} {
-        background: #1a73e8;
-        border: 0;
-        color: #fff;
+        background: #0f172a;
+        border: 1px solid #0f172a;
+        color: #f8fafc;
         cursor: pointer;
         font-size: 12px;
+        font-weight: 600;
         line-height: 1;
         margin-right: 8px;
-        padding: 4px 8px;
+        padding: 6px 10px;
         position: relative;
-        border-radius: 4px;
-        transition: transform 150ms ease, background 150ms ease, opacity 150ms ease;
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+        transition: transform 150ms ease, background 150ms ease, opacity 150ms ease, box-shadow 150ms ease;
       }
-      .${COPY_BUTTON_CLASS}:hover { background: #1557b0; }
+      .${COPY_BUTTON_CLASS}:hover {
+        background: #1e293b;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+      }
+      .${COPY_BUTTON_CLASS}:focus-visible {
+        outline: 2px solid rgba(59, 130, 246, 0.6);
+        outline-offset: 2px;
+      }
       .${COPY_BUTTON_CLASS}.copied {
-        background: #188038;
-        transform: scale(1.05);
+        background: #16a34a;
+        border-color: #16a34a;
+        transform: translateY(-1px);
       }
       .${COPY_BUTTON_CLASS}.copied::after {
         content: '';
         position: absolute;
-        inset: 0;
-        border-radius: 4px;
-        box-shadow: 0 0 0 6px rgba(24, 128, 56, 0.15);
+        inset: -4px;
+        border-radius: 10px;
+        box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.18);
         opacity: 0;
         animation: ae-helper-pulse 450ms ease;
       }
       .${CAD_ROW_CLASS} {
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 8px;
-        margin-top: 6px;
+        margin-top: 8px;
+        padding: 6px 10px;
+        border-radius: 10px;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
         font-size: 12px;
-        color: #222;
+        color: #0f172a;
       }
       .${CAD_ROW_CLASS} .${COPY_BUTTON_CLASS} { margin-right: 0; }
+      .ae-helper-cad-label {
+        color: #0f172a;
+        font-weight: 600;
+      }
+      .ae-helper-cad-value {
+        color: #0f172a;
+        font-weight: 700;
+      }
       .${PER_UNIT_ROW_CLASS} {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-top: 6px;
-        font-size: 14px;
-        color: #222;
+        margin-top: 8px;
+        padding: 8px 12px;
+        border-radius: 12px;
+        border: 1px dashed #cbd5f5;
+        background: #eef2ff;
+        font-size: 13px;
+        color: #1e1b4b;
+        gap: 12px;
       }
       .${PER_UNIT_LABEL_CLASS} {
-        font-weight: 600;
-        color: #191919;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 700;
+        color: #1e1b4b;
       }
       .${PER_UNIT_VALUE_CLASS} {
-        font-weight: 600;
-        color: #191919;
+        font-weight: 700;
+        color: #0f172a;
       }
       .${PER_UNIT_MESSAGE_CLASS} {
-        color: #5f6368;
-        font-weight: 400;
+        color: #475569;
+        font-weight: 500;
+      }
+      .${CART_BADGE_CLASS} {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        background: #0f172a;
+        color: #f8fafc;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .${CART_CAD_TOTAL_CLASS} {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 8px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #ecfdf3;
+        border: 1px solid #86efac;
+        color: #14532d;
+        font-size: 12px;
+        font-weight: 600;
       }
       @keyframes ae-helper-pulse {
-        0% { opacity: 1; transform: scale(0.9); }
-        100% { opacity: 0; transform: scale(1.4); }
+        0% { opacity: 1; transform: scale(0.95); }
+        100% { opacity: 0; transform: scale(1.15); }
       }
     `;
 
@@ -170,6 +228,13 @@
     return (priceNode?.textContent || totalNode.textContent || '').replace(/\s+/g, ' ').trim();
   };
 
+  const getCartSummaryUsdText = (contentNode) => {
+    if (!contentNode) return '';
+    const primaryNode = contentNode.querySelector(`:scope > span:not(.${CART_CAD_TOTAL_CLASS})`);
+    const text = primaryNode?.textContent || contentNode.textContent || '';
+    return text.replace(/\s+/g, ' ').trim();
+  };
+
   const ensureRate = async () => {
     const now = Date.now();
     if (cadRate && now - lastRateFetch < RATE_REFRESH_MS) return cadRate;
@@ -231,13 +296,17 @@
 
       const cadLabel = document.createElement('span');
       cadLabel.className = 'ae-helper-cad-label';
-      cadLabel.textContent = 'CAD Total:';
+      cadLabel.textContent = 'CAD Total';
 
       const cadValueNode = document.createElement('span');
       cadValueNode.className = 'ae-helper-cad-value';
       cadValueNode.dataset.value = cadAmount;
 
-      cadRow.append(cadCopy, cadLabel, cadValueNode);
+      const badge = document.createElement('span');
+      badge.className = CART_BADGE_CLASS;
+      badge.textContent = 'AE Helper';
+
+      cadRow.append(badge, cadLabel, cadValueNode, cadCopy);
       host.insertBefore(cadRow, host.querySelector('.order-item-btns-wrap') || null);
     }
 
@@ -325,7 +394,11 @@
 
       const label = document.createElement('div');
       label.className = PER_UNIT_LABEL_CLASS;
-      label.textContent = 'Per-unit cost';
+      label.textContent = 'Per-unit cost (CAD)';
+
+      const badge = document.createElement('span');
+      badge.className = CART_BADGE_CLASS;
+      badge.textContent = 'AE Helper';
 
       const content = document.createElement('div');
       content.className = 'ae-helper-per-unit-content';
@@ -337,6 +410,7 @@
       message.className = PER_UNIT_MESSAGE_CLASS;
 
       content.append(value, message);
+      label.append(badge);
       row.append(label, content);
 
       estimatedRow.insertAdjacentElement('afterend', row);
@@ -360,7 +434,47 @@
     return null;
   };
 
-  const updatePerUnitRow = () => {
+  const ensureCartCadTotalNode = (estimatedRow) => {
+    const contentNode = estimatedRow?.querySelector(CART_SUMMARY_CONTENT_SELECTOR);
+    if (!contentNode) return null;
+    let cadNode = contentNode.querySelector(`.${CART_CAD_TOTAL_CLASS}`);
+    if (!cadNode) {
+      cadNode = document.createElement('span');
+      cadNode.className = CART_CAD_TOTAL_CLASS;
+
+      const badge = document.createElement('span');
+      badge.className = CART_BADGE_CLASS;
+      badge.textContent = 'AE Helper';
+
+      const valueNode = document.createElement('span');
+      valueNode.className = 'ae-helper-cart-cad-value';
+
+      cadNode.append(badge, valueNode);
+      contentNode.append(cadNode);
+    }
+    return cadNode;
+  };
+
+  const updateCartCadTotal = async (estimatedRow, parsedTotal) => {
+    const cadNode = ensureCartCadTotalNode(estimatedRow);
+    if (!cadNode) return;
+    if (!parsedTotal) {
+      cadNode.hidden = true;
+      return;
+    }
+    const rate = await ensureRate();
+    if (!rate) {
+      cadNode.hidden = true;
+      return;
+    }
+    const valueNode = cadNode.querySelector('.ae-helper-cart-cad-value');
+    if (!valueNode) return;
+    const cadAmount = parsedTotal.amount * rate;
+    valueNode.textContent = formatCad(cadAmount);
+    cadNode.hidden = false;
+  };
+
+  const updatePerUnitRow = async () => {
     const row = ensurePerUnitRow();
     if (!row) return;
 
@@ -368,20 +482,27 @@
     const messageNode = row.querySelector(`.${PER_UNIT_MESSAGE_CLASS}`);
     if (!valueNode || !messageNode) return;
 
+    const estimatedRow = findEstimatedTotalRow();
+    const estimatedContent = estimatedRow?.querySelector(CART_SUMMARY_CONTENT_SELECTOR);
+    const estimatedText = getCartSummaryUsdText(estimatedContent);
+    const parsed = parseCurrencyAmount(estimatedText);
+    if (estimatedRow && parsed) {
+      updateCartCadTotal(estimatedRow, parsed);
+    } else if (estimatedRow) {
+      const cadNode = ensureCartCadTotalNode(estimatedRow);
+      if (cadNode) cadNode.hidden = true;
+    }
+
     const selectedItems = Array.from(document.querySelectorAll(CART_CHOSEN_ITEM_SELECTOR));
     if (selectedItems.length !== 1) {
       row.hidden = false;
       valueNode.textContent = '';
       valueNode.style.display = 'none';
       messageNode.style.display = 'inline';
-      messageNode.textContent = 'Select exactly one item to calculate per-unit cost.';
+      messageNode.textContent = 'Select exactly one item to calculate CAD per-unit cost.';
       return;
     }
 
-    const estimatedRow = findEstimatedTotalRow();
-    const estimatedContent = estimatedRow?.querySelector(CART_SUMMARY_CONTENT_SELECTOR);
-    const estimatedText = (estimatedContent?.textContent || '').trim();
-    const parsed = parseCurrencyAmount(estimatedText);
     const product = resolveSelectedProduct(selectedItems[0]);
     const quantityInput = product?.querySelector(CART_QUANTITY_INPUT_SELECTOR);
     const quantity = quantityInput ? Number(quantityInput.value.replace(/,/g, '')) : NaN;
@@ -391,14 +512,19 @@
       return;
     }
 
-    const perUnit = parsed.amount / quantity;
-    if (!Number.isFinite(perUnit)) {
+    const rate = await ensureRate();
+    if (!rate) {
       row.hidden = true;
       return;
     }
 
-    const currencyPrefix = parsed.currency ? parsed.currency : '';
-    valueNode.textContent = `${currencyPrefix}${perUnit.toFixed(2)}`;
+    const perUnitCad = (parsed.amount * rate) / quantity;
+    if (!Number.isFinite(perUnitCad)) {
+      row.hidden = true;
+      return;
+    }
+
+    valueNode.textContent = formatCad(perUnitCad);
     valueNode.style.display = 'inline';
     messageNode.style.display = 'none';
     row.hidden = false;
@@ -439,17 +565,22 @@
 
   const init = () => {
     addStyles();
-    if (isCartPage()) {
+    const isCart = isCartPage();
+    if (isCart) {
       scheduleCartUpdate();
       observeCart();
     } else {
       scheduleScan();
       observe();
-      setInterval(() => {
-        cadRate = null;
-        scheduleScan();
-      }, RATE_REFRESH_MS);
     }
+    setInterval(() => {
+      cadRate = null;
+      if (isCart) {
+        scheduleCartUpdate();
+      } else {
+        scheduleScan();
+      }
+    }, RATE_REFRESH_MS);
   };
 
   if (document.readyState === 'loading') {
