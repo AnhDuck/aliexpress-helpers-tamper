@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Helpers
 // @namespace    https://www.aliexpress.com/
-// @version      0.2.1
+// @version      0.2.2
 // @description  Add copy buttons, CAD conversion, and per-unit cost helper on AliExpress.
 // @match        https://www.aliexpress.com/p/order/index.html*
 // @match        https://www.aliexpress.com/p/shoppingcart/index.html*
@@ -27,11 +27,10 @@
   const CART_PRODUCT_SELECTOR = '.cart-product';
   const CART_PRODUCT_IMAGE_SELECTOR = '.cart-product-img';
   const CART_QUANTITY_INPUT_SELECTOR = '.comet-v2-input-number-input[aria-label="number"]';
-  const PER_UNIT_ROW_CLASS = 'ae-helper-per-unit-row';
-  const PER_UNIT_LABEL_CLASS = 'ae-helper-per-unit-label';
-  const PER_UNIT_VALUE_CLASS = 'ae-helper-per-unit-value';
-  const PER_UNIT_MESSAGE_CLASS = 'ae-helper-per-unit-message';
-  const CART_CAD_TOTAL_CLASS = 'ae-helper-cart-cad-total';
+  const CART_HELPER_ROW_CLASS = 'ae-helper-cart-row';
+  const CART_HELPER_HEADER_CLASS = 'ae-helper-cart-header';
+  const CART_HELPER_TABLE_CLASS = 'ae-helper-cart-table';
+  const CART_HELPER_MESSAGE_CLASS = 'ae-helper-cart-message';
   const CART_BADGE_CLASS = 'ae-helper-badge';
   const LOG_PREFIX = '[AE Helpers]';
 
@@ -107,31 +106,53 @@
         color: #0f172a;
         font-weight: 700;
       }
-      .${PER_UNIT_ROW_CLASS} {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-top: 8px;
-        padding: 8px 12px;
+      .${CART_HELPER_ROW_CLASS} {
+        margin-top: 10px;
+        padding: 10px 12px;
         border-radius: 12px;
         border: 1px dashed #cbd5f5;
         background: #eef2ff;
-        font-size: 13px;
         color: #1e1b4b;
-        gap: 12px;
       }
-      .${PER_UNIT_LABEL_CLASS} {
+      .${CART_HELPER_HEADER_CLASS} {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
+        font-size: 12px;
         font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 8px;
         color: #1e1b4b;
       }
-      .${PER_UNIT_VALUE_CLASS} {
-        font-weight: 700;
+      .${CART_HELPER_TABLE_CLASS} {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
         color: #0f172a;
       }
-      .${PER_UNIT_MESSAGE_CLASS} {
+      .${CART_HELPER_TABLE_CLASS} th,
+      .${CART_HELPER_TABLE_CLASS} td {
+        padding: 6px 8px;
+        text-align: left;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+      }
+      .${CART_HELPER_TABLE_CLASS} thead th {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #475569;
+      }
+      .${CART_HELPER_TABLE_CLASS} tbody th {
+        font-weight: 600;
+        color: #1e1b4b;
+      }
+      .${CART_HELPER_TABLE_CLASS} td {
+        font-weight: 600;
+      }
+      .${CART_HELPER_MESSAGE_CLASS} {
+        margin-top: 8px;
+        font-size: 12px;
         color: #475569;
         font-weight: 500;
       }
@@ -147,19 +168,6 @@
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-      }
-      .${CART_CAD_TOTAL_CLASS} {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        margin-left: 8px;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: #ecfdf3;
-        border: 1px solid #86efac;
-        color: #14532d;
-        font-size: 12px;
-        font-weight: 600;
       }
       @keyframes ae-helper-pulse {
         0% { opacity: 1; transform: scale(0.95); }
@@ -230,7 +238,7 @@
 
   const getCartSummaryUsdText = (contentNode) => {
     if (!contentNode) return '';
-    const primaryNode = contentNode.querySelector(`:scope > span:not(.${CART_CAD_TOTAL_CLASS})`);
+    const primaryNode = contentNode.querySelector(':scope > span');
     const text = primaryNode?.textContent || contentNode.textContent || '';
     return text.replace(/\s+/g, ' ').trim();
   };
@@ -377,42 +385,77 @@
   const findEstimatedTotalRow = () => {
     const labels = document.querySelectorAll(CART_SUMMARY_LABEL_SELECTOR);
     for (const label of labels) {
-      if (label.textContent?.trim().toLowerCase() === CART_ESTIMATED_TOTAL_LABEL) {
+      const text = label.textContent?.trim().toLowerCase() || '';
+      if (text === CART_ESTIMATED_TOTAL_LABEL) {
         return label.closest(CART_SUMMARY_ITEM_SELECTOR);
       }
     }
-    return null;
+
+    const rows = Array.from(document.querySelectorAll(CART_SUMMARY_ITEM_SELECTOR));
+    const fallback = rows
+      .map((row) => {
+        const label = row.querySelector(CART_SUMMARY_LABEL_SELECTOR);
+        const content = row.querySelector(CART_SUMMARY_CONTENT_SELECTOR);
+        return { row, label, content };
+      })
+      .filter(({ label, content }) => label && content)
+      .find(({ content }) => {
+        const text = getCartSummaryUsdText(content);
+        const parsed = parseCurrencyAmount(text);
+        return parsed && parsed.amount >= 0;
+      });
+
+    return fallback?.row || null;
   };
 
-  const ensurePerUnitRow = () => {
+  const ensureCartHelperRow = () => {
     const estimatedRow = findEstimatedTotalRow();
     if (!estimatedRow) return null;
     let row = estimatedRow.nextElementSibling;
-    if (!row || !row.classList.contains(PER_UNIT_ROW_CLASS)) {
+    if (!row || !row.classList.contains(CART_HELPER_ROW_CLASS)) {
       row = document.createElement('div');
-      row.className = PER_UNIT_ROW_CLASS;
+      row.className = CART_HELPER_ROW_CLASS;
 
-      const label = document.createElement('div');
-      label.className = PER_UNIT_LABEL_CLASS;
-      label.textContent = 'Per-unit cost (CAD)';
+      const header = document.createElement('div');
+      header.className = CART_HELPER_HEADER_CLASS;
 
       const badge = document.createElement('span');
       badge.className = CART_BADGE_CLASS;
       badge.textContent = 'AE Helper';
 
-      const content = document.createElement('div');
-      content.className = 'ae-helper-per-unit-content';
+      const title = document.createElement('span');
+      title.textContent = 'Cart Summary (USD / CAD)';
 
-      const value = document.createElement('span');
-      value.className = PER_UNIT_VALUE_CLASS;
+      header.append(badge, title);
 
-      const message = document.createElement('span');
-      message.className = PER_UNIT_MESSAGE_CLASS;
+      const table = document.createElement('table');
+      table.className = CART_HELPER_TABLE_CLASS;
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th></th>
+            <th>USD</th>
+            <th>CAD</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Estimated total</th>
+            <td class="ae-helper-usd-total">—</td>
+            <td class="ae-helper-cad-total">—</td>
+          </tr>
+          <tr>
+            <th>Per-unit cost</th>
+            <td class="ae-helper-usd-unit">—</td>
+            <td class="ae-helper-cad-unit">—</td>
+          </tr>
+        </tbody>
+      `;
 
-      content.append(value, message);
-      label.append(badge);
-      row.append(label, content);
+      const message = document.createElement('div');
+      message.className = CART_HELPER_MESSAGE_CLASS;
 
+      row.append(header, table, message);
       estimatedRow.insertAdjacentElement('afterend', row);
     }
     return row;
@@ -434,72 +477,47 @@
     return null;
   };
 
-  const ensureCartCadTotalNode = (estimatedRow) => {
-    const contentNode = estimatedRow?.querySelector(CART_SUMMARY_CONTENT_SELECTOR);
-    if (!contentNode) return null;
-    let cadNode = contentNode.querySelector(`.${CART_CAD_TOTAL_CLASS}`);
-    if (!cadNode) {
-      cadNode = document.createElement('span');
-      cadNode.className = CART_CAD_TOTAL_CLASS;
-
-      const badge = document.createElement('span');
-      badge.className = CART_BADGE_CLASS;
-      badge.textContent = 'AE Helper';
-
-      const valueNode = document.createElement('span');
-      valueNode.className = 'ae-helper-cart-cad-value';
-
-      cadNode.append(badge, valueNode);
-      contentNode.append(cadNode);
-    }
-    return cadNode;
+  const removeLegacyCartBadges = () => {
+    document.querySelectorAll('.ae-helper-cart-cad-total').forEach((node) => node.remove());
   };
 
-  const updateCartCadTotal = async (estimatedRow, parsedTotal) => {
-    const cadNode = ensureCartCadTotalNode(estimatedRow);
-    if (!cadNode) return;
-    if (!parsedTotal) {
-      cadNode.hidden = true;
-      return;
-    }
-    const rate = await ensureRate();
-    if (!rate) {
-      cadNode.hidden = true;
-      return;
-    }
-    const valueNode = cadNode.querySelector('.ae-helper-cart-cad-value');
-    if (!valueNode) return;
-    const cadAmount = parsedTotal.amount * rate;
-    valueNode.textContent = formatCad(cadAmount);
-    cadNode.hidden = false;
-  };
-
-  const updatePerUnitRow = async () => {
-    const row = ensurePerUnitRow();
+  const updateCartHelperRow = async () => {
+    removeLegacyCartBadges();
+    const row = ensureCartHelperRow();
     if (!row) return;
 
-    const valueNode = row.querySelector(`.${PER_UNIT_VALUE_CLASS}`);
-    const messageNode = row.querySelector(`.${PER_UNIT_MESSAGE_CLASS}`);
-    if (!valueNode || !messageNode) return;
+    const usdTotalNode = row.querySelector('.ae-helper-usd-total');
+    const cadTotalNode = row.querySelector('.ae-helper-cad-total');
+    const usdUnitNode = row.querySelector('.ae-helper-usd-unit');
+    const cadUnitNode = row.querySelector('.ae-helper-cad-unit');
+    const messageNode = row.querySelector(`.${CART_HELPER_MESSAGE_CLASS}`);
+    if (!usdTotalNode || !cadTotalNode || !usdUnitNode || !cadUnitNode || !messageNode) return;
 
     const estimatedRow = findEstimatedTotalRow();
     const estimatedContent = estimatedRow?.querySelector(CART_SUMMARY_CONTENT_SELECTOR);
     const estimatedText = getCartSummaryUsdText(estimatedContent);
     const parsed = parseCurrencyAmount(estimatedText);
-    if (estimatedRow && parsed) {
-      updateCartCadTotal(estimatedRow, parsed);
-    } else if (estimatedRow) {
-      const cadNode = ensureCartCadTotalNode(estimatedRow);
-      if (cadNode) cadNode.hidden = true;
+
+    if (!parsed) {
+      row.hidden = true;
+      return;
+    }
+
+    usdTotalNode.textContent = `${parsed.currency || ''}${parsed.amount.toFixed(2)}`;
+
+    const rate = await ensureRate();
+    if (rate) {
+      cadTotalNode.textContent = formatCad(parsed.amount * rate);
+    } else {
+      cadTotalNode.textContent = '—';
     }
 
     const selectedItems = Array.from(document.querySelectorAll(CART_CHOSEN_ITEM_SELECTOR));
     if (selectedItems.length !== 1) {
+      usdUnitNode.textContent = '—';
+      cadUnitNode.textContent = '—';
+      messageNode.textContent = 'Select exactly one item to calculate per-unit cost.';
       row.hidden = false;
-      valueNode.textContent = '';
-      valueNode.style.display = 'none';
-      messageNode.style.display = 'inline';
-      messageNode.textContent = 'Select exactly one item to calculate CAD per-unit cost.';
       return;
     }
 
@@ -507,26 +525,20 @@
     const quantityInput = product?.querySelector(CART_QUANTITY_INPUT_SELECTOR);
     const quantity = quantityInput ? Number(quantityInput.value.replace(/,/g, '')) : NaN;
 
-    if (!parsed || !Number.isFinite(quantity) || quantity <= 0) {
+    if (!Number.isFinite(quantity) || quantity <= 0) {
       row.hidden = true;
       return;
     }
 
-    const rate = await ensureRate();
-    if (!rate) {
+    const perUnitUsd = parsed.amount / quantity;
+    if (!Number.isFinite(perUnitUsd)) {
       row.hidden = true;
       return;
     }
 
-    const perUnitCad = (parsed.amount * rate) / quantity;
-    if (!Number.isFinite(perUnitCad)) {
-      row.hidden = true;
-      return;
-    }
-
-    valueNode.textContent = formatCad(perUnitCad);
-    valueNode.style.display = 'inline';
-    messageNode.style.display = 'none';
+    usdUnitNode.textContent = `${parsed.currency || ''}${perUnitUsd.toFixed(2)}`;
+    cadUnitNode.textContent = rate ? formatCad(perUnitUsd * rate) : '—';
+    messageNode.textContent = '';
     row.hidden = false;
   };
 
@@ -534,7 +546,7 @@
     if (cartUpdateTimer) window.clearTimeout(cartUpdateTimer);
     cartUpdateTimer = window.setTimeout(() => {
       cartUpdateTimer = null;
-      updatePerUnitRow();
+      updateCartHelperRow();
     }, 150);
   };
 
