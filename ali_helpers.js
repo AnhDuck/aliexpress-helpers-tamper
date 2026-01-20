@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         AliExpress Helpers
 // @namespace    https://www.aliexpress.com/
-// @version      0.1.0
-// @description  Add copy buttons and CAD conversion on order list totals.
+// @version      0.2.0
+// @description  Add copy buttons, CAD conversion, and per-unit cost helper on AliExpress.
 // @match        https://www.aliexpress.com/p/order/index.html*
+// @match        https://www.aliexpress.com/p/shoppingcart/index.html*
 // @grant        GM_addStyle
 // @grant        GM_setClipboard
 // ==/UserScript==
@@ -17,12 +18,26 @@
   const TOTAL_SELECTOR = '[data-pl="order_item_content_price_total"]';
   const COPY_BUTTON_CLASS = 'ae-helper-copy-btn';
   const CAD_ROW_CLASS = 'ae-helper-cad-row';
+  const CART_PAGE_PATH = '/p/shoppingcart/index.html';
+  const CART_ESTIMATED_TOTAL_LABEL = 'estimated total';
+  const CART_SUMMARY_ITEM_SELECTOR = '.cart-summary-item-wrapStyle';
+  const CART_SUMMARY_LABEL_SELECTOR = '.cart-summary-item-wrapStyle-label';
+  const CART_SUMMARY_CONTENT_SELECTOR = '.cart-summary-item-wrapStyle-content';
+  const CART_CHOSEN_ITEM_SELECTOR = '.cart-summary-chosenCartLines-item';
+  const CART_PRODUCT_SELECTOR = '.cart-product';
+  const CART_PRODUCT_IMAGE_SELECTOR = '.cart-product-img';
+  const CART_QUANTITY_INPUT_SELECTOR = '.comet-v2-input-number-input[aria-label="number"]';
+  const PER_UNIT_ROW_CLASS = 'ae-helper-per-unit-row';
+  const PER_UNIT_LABEL_CLASS = 'ae-helper-per-unit-label';
+  const PER_UNIT_VALUE_CLASS = 'ae-helper-per-unit-value';
+  const PER_UNIT_MESSAGE_CLASS = 'ae-helper-per-unit-message';
   const LOG_PREFIX = '[AE Helpers]';
 
   let cadRate = null;
   let lastRateFetch = 0;
   let lastRateError = null;
   let scanScheduled = false;
+  let cartUpdateTimer = null;
   const processedContainers = new WeakSet();
 
   const logDebug = (...args) => {
@@ -68,6 +83,26 @@
         color: #222;
       }
       .${CAD_ROW_CLASS} .${COPY_BUTTON_CLASS} { margin-right: 0; }
+      .${PER_UNIT_ROW_CLASS} {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 6px;
+        font-size: 14px;
+        color: #222;
+      }
+      .${PER_UNIT_LABEL_CLASS} {
+        font-weight: 600;
+        color: #191919;
+      }
+      .${PER_UNIT_VALUE_CLASS} {
+        font-weight: 600;
+        color: #191919;
+      }
+      .${PER_UNIT_MESSAGE_CLASS} {
+        color: #5f6368;
+        font-weight: 400;
+      }
       @keyframes ae-helper-pulse {
         0% { opacity: 1; transform: scale(0.9); }
         100% { opacity: 0; transform: scale(1.4); }
@@ -109,6 +144,23 @@
     if (!match) return null;
     const value = Number(match[1]);
     return Number.isFinite(value) ? value : null;
+  };
+
+  const parseCurrencyAmount = (text) => {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    const match = normalized.match(/(-?[\d,.]+)/);
+    if (!match) return null;
+    const amount = Number(match[1].replace(/,/g, ''));
+    if (!Number.isFinite(amount)) return null;
+    const currency = normalized.replace(match[1], '').replace(/\s+/g, ' ').trim();
+    return { amount, currency };
+  };
+
+  const extractBackgroundImageUrl = (element) => {
+    if (!element) return null;
+    const style = element.style?.backgroundImage || '';
+    const match = style.match(/url\(["']?(.*?)["']?\)/i);
+    return match ? match[1] : null;
   };
 
   const formatCad = (value) => `CA $${value.toFixed(2)}`;
@@ -251,14 +303,153 @@
     observer.observe(document.body, { childList: true, subtree: true });
   };
 
+  const isCartPage = () => window.location.pathname.includes(CART_PAGE_PATH);
+
+  const findEstimatedTotalRow = () => {
+    const labels = document.querySelectorAll(CART_SUMMARY_LABEL_SELECTOR);
+    for (const label of labels) {
+      if (label.textContent?.trim().toLowerCase() === CART_ESTIMATED_TOTAL_LABEL) {
+        return label.closest(CART_SUMMARY_ITEM_SELECTOR);
+      }
+    }
+    return null;
+  };
+
+  const ensurePerUnitRow = () => {
+    const estimatedRow = findEstimatedTotalRow();
+    if (!estimatedRow) return null;
+    let row = estimatedRow.nextElementSibling;
+    if (!row || !row.classList.contains(PER_UNIT_ROW_CLASS)) {
+      row = document.createElement('div');
+      row.className = PER_UNIT_ROW_CLASS;
+
+      const label = document.createElement('div');
+      label.className = PER_UNIT_LABEL_CLASS;
+      label.textContent = 'Per-unit cost';
+
+      const content = document.createElement('div');
+      content.className = 'ae-helper-per-unit-content';
+
+      const value = document.createElement('span');
+      value.className = PER_UNIT_VALUE_CLASS;
+
+      const message = document.createElement('span');
+      message.className = PER_UNIT_MESSAGE_CLASS;
+
+      content.append(value, message);
+      row.append(label, content);
+
+      estimatedRow.insertAdjacentElement('afterend', row);
+    }
+    return row;
+  };
+
+  const resolveSelectedProduct = (selectedItem) => {
+    if (!selectedItem) return null;
+    const targetImageUrl = extractBackgroundImageUrl(
+      selectedItem.querySelector('.cart-summary-chosenCartLines-item-img')
+    );
+    const products = Array.from(document.querySelectorAll(CART_PRODUCT_SELECTOR));
+    if (targetImageUrl) {
+      const matched = products.find((product) => {
+        const imageNode = product.querySelector(CART_PRODUCT_IMAGE_SELECTOR);
+        return extractBackgroundImageUrl(imageNode) === targetImageUrl;
+      });
+      if (matched) return matched;
+    }
+    return null;
+  };
+
+  const updatePerUnitRow = () => {
+    const row = ensurePerUnitRow();
+    if (!row) return;
+
+    const valueNode = row.querySelector(`.${PER_UNIT_VALUE_CLASS}`);
+    const messageNode = row.querySelector(`.${PER_UNIT_MESSAGE_CLASS}`);
+    if (!valueNode || !messageNode) return;
+
+    const selectedItems = Array.from(document.querySelectorAll(CART_CHOSEN_ITEM_SELECTOR));
+    if (selectedItems.length !== 1) {
+      row.hidden = false;
+      valueNode.textContent = '';
+      valueNode.style.display = 'none';
+      messageNode.style.display = 'inline';
+      messageNode.textContent = 'Select exactly one item to calculate per-unit cost.';
+      return;
+    }
+
+    const estimatedRow = findEstimatedTotalRow();
+    const estimatedContent = estimatedRow?.querySelector(CART_SUMMARY_CONTENT_SELECTOR);
+    const estimatedText = (estimatedContent?.textContent || '').trim();
+    const parsed = parseCurrencyAmount(estimatedText);
+    const product = resolveSelectedProduct(selectedItems[0]);
+    const quantityInput = product?.querySelector(CART_QUANTITY_INPUT_SELECTOR);
+    const quantity = quantityInput ? Number(quantityInput.value.replace(/,/g, '')) : NaN;
+
+    if (!parsed || !Number.isFinite(quantity) || quantity <= 0) {
+      row.hidden = true;
+      return;
+    }
+
+    const perUnit = parsed.amount / quantity;
+    if (!Number.isFinite(perUnit)) {
+      row.hidden = true;
+      return;
+    }
+
+    const currencyPrefix = parsed.currency ? parsed.currency : '';
+    valueNode.textContent = `${currencyPrefix}${perUnit.toFixed(2)}`;
+    valueNode.style.display = 'inline';
+    messageNode.style.display = 'none';
+    row.hidden = false;
+  };
+
+  const scheduleCartUpdate = () => {
+    if (cartUpdateTimer) window.clearTimeout(cartUpdateTimer);
+    cartUpdateTimer = window.setTimeout(() => {
+      cartUpdateTimer = null;
+      updatePerUnitRow();
+    }, 150);
+  };
+
+  const observeCart = () => {
+    const observer = new MutationObserver(scheduleCartUpdate);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    document.addEventListener(
+      'input',
+      (event) => {
+        if (event.target?.matches(CART_QUANTITY_INPUT_SELECTOR)) {
+          scheduleCartUpdate();
+        }
+      },
+      true
+    );
+
+    document.addEventListener(
+      'click',
+      (event) => {
+        if (event.target?.closest(CART_PRODUCT_SELECTOR)) {
+          scheduleCartUpdate();
+        }
+      },
+      true
+    );
+  };
+
   const init = () => {
     addStyles();
-    scheduleScan();
-    observe();
-    setInterval(() => {
-      cadRate = null;
+    if (isCartPage()) {
+      scheduleCartUpdate();
+      observeCart();
+    } else {
       scheduleScan();
-    }, RATE_REFRESH_MS);
+      observe();
+      setInterval(() => {
+        cadRate = null;
+        scheduleScan();
+      }, RATE_REFRESH_MS);
+    }
   };
 
   if (document.readyState === 'loading') {
