@@ -111,6 +111,10 @@
         justify-content: space-between;
         align-items: center;
         margin-top: 8px;
+        width: 100%;
+        box-sizing: border-box;
+        align-self: stretch;
+        flex: 0 0 auto;
         padding: 8px 12px;
         border-radius: 12px;
         border: 1px dashed #cbd5f5;
