@@ -407,6 +407,20 @@
     return row;
   };
 
+  const normalizePerUnitRows = (expectedRow) => {
+    const rows = Array.from(document.querySelectorAll(`.${PER_UNIT_ROW_CLASS}`));
+    for (const row of rows) {
+      if (row !== expectedRow) {
+        row.remove();
+      }
+    }
+
+    const estimatedRow = findEstimatedTotalRow();
+    if (estimatedRow && expectedRow !== estimatedRow.nextElementSibling) {
+      estimatedRow.insertAdjacentElement('afterend', expectedRow);
+    }
+  };
+
   const resolveSelectedProduct = (selectedItem) => {
     if (!selectedItem) return null;
     const targetImageUrl = extractBackgroundImageUrl(
@@ -431,6 +445,7 @@
     removeLegacyCartBadges();
     const row = ensurePerUnitRow();
     if (!row) return;
+    normalizePerUnitRows(row);
 
     const valueNode = row.querySelector(`.${PER_UNIT_VALUE_CLASS}`);
     const messageNode = row.querySelector(`.${PER_UNIT_MESSAGE_CLASS}`);
