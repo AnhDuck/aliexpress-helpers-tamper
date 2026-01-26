@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Helpers
 // @namespace    https://www.aliexpress.com/
-// @version      0.2.3
+// @version      0.2.4
 // @description  Add copy buttons, CAD conversion, and per-unit cost helper on AliExpress.
 // @match        https://www.aliexpress.com/p/order/index.html*
 // @match        https://www.aliexpress.com/p/shoppingcart/index.html*
@@ -17,6 +17,7 @@
   const CONTAINER_SELECTOR = '.order-item-content-opt-price';
   const TOTAL_SELECTOR = '[data-pl="order_item_content_price_total"]';
   const COPY_BUTTON_CLASS = 'ae-helper-copy-btn';
+  const CAD_COPY_BUTTON_CLASS = 'ae-helper-cad-copy';
   const CAD_ROW_CLASS = 'ae-helper-cad-row';
   const CART_PAGE_PATH = '/p/shoppingcart/index.html';
   const CART_ESTIMATED_TOTAL_LABEL = 'estimated total';
@@ -39,7 +40,6 @@
   let lastRateError = null;
   let scanScheduled = false;
   let cartUpdateTimer = null;
-  const processedContainers = new WeakSet();
 
   const logDebug = (...args) => {
     console.debug(LOG_PREFIX, ...args);
@@ -70,6 +70,14 @@
       .${COPY_BUTTON_CLASS}:focus-visible {
         outline: 2px solid rgba(59, 130, 246, 0.6);
         outline-offset: 2px;
+      }
+      .${CAD_COPY_BUTTON_CLASS} {
+        background: #2563eb;
+        border-color: #2563eb;
+      }
+      .${CAD_COPY_BUTTON_CLASS}:hover {
+        background: #1d4ed8;
+        border-color: #1d4ed8;
       }
       .${COPY_BUTTON_CLASS}.copied {
         background: #16a34a;
@@ -279,7 +287,7 @@
 
       const cadCopy = document.createElement('button');
       cadCopy.type = 'button';
-      cadCopy.className = COPY_BUTTON_CLASS;
+      cadCopy.className = `${COPY_BUTTON_CLASS} ${CAD_COPY_BUTTON_CLASS}`;
       cadCopy.textContent = 'Copy';
       cadCopy.addEventListener('click', () => handleCopy(cadCopy, cadValueNode.dataset.value || cadAmount));
 
@@ -295,7 +303,7 @@
       badge.className = CART_BADGE_CLASS;
       badge.textContent = 'AE Helper';
 
-      cadRow.append(badge, cadLabel, cadValueNode, cadCopy);
+      cadRow.append(badge, cadCopy, cadLabel, cadValueNode);
       host.insertBefore(cadRow, host.querySelector('.order-item-btns-wrap') || null);
     }
 
@@ -309,22 +317,6 @@
   const enhanceTotal = (container) => {
     const totalNode = container.querySelector(TOTAL_SELECTOR);
     if (!totalNode) return;
-
-    if (!processedContainers.has(container)) {
-      processedContainers.add(container);
-      logDebug('Injecting USD copy button.');
-      const copyButton = document.createElement('button');
-      copyButton.type = 'button';
-      copyButton.className = COPY_BUTTON_CLASS;
-      copyButton.textContent = 'Copy';
-      copyButton.addEventListener('click', () => {
-        const usdText = getUsdText(totalNode);
-        const usdValue = usdText ? parseUsd(usdText) : null;
-        if (usdValue !== null) handleCopy(copyButton, usdValue.toString());
-      });
-
-      totalNode.parentElement?.insertBefore(copyButton, totalNode);
-    }
 
     updateCadRow(container, totalNode);
   };
